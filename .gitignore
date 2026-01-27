@@ -1,0 +1,27 @@
+# Virtual environment
+venv/
+env/
+*.pyc
+__pycache__/
+
+# Poetry
+.venv/
+poetry.lock
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flask
+instance/
+.env
+.envrc
+*.log

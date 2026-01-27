@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "vision-sensor"
+version = "0.1.0"
+description = "Web application with authentication for streaming USB camera feed and capturing images"
+authors = ["Chad Agate <chad@goautolane.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+Flask = "^3.0.0"
+Flask-Login = "^0.6.3"
+Werkzeug = "^3.0.1"
+opencv-python = "^4.8.1"
+Pillow = "^10.1.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+black = "^23.0.0"
+flake8 = "^6.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

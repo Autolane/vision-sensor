@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Vision Sensor{% endblock %} - Autolane</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="{{ url_for('static', filename='autolane-logo.png') }}" alt="Autolane" height="40">
+            </div>
+            <nav>
+                {% if current_user.is_authenticated %}
+                <span style="color: var(--header-text);">{{ current_user.username }}</span>
+                <a href="{{ url_for('logout') }}" class="btn-link">Logout</a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Autolane. Vision Sensor Portal</p>
+    </footer>
+</body>
+</html>

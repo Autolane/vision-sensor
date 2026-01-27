@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Camera Stream{% endblock %}
+
+{% block content %}
+<div class="camera-container">
+    <h2>Live Camera Stream</h2>
+    <div class="video-wrapper">
+        <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Camera Stream">
+    </div>
+
+    <div class="controls">
+        <button id="captureBtn" class="btn-capture">Capture Image</button>
+    </div>
+
+    <div id="notification" class="notification"></div>
+</div>
+
+<div class="info-section">
+    <h3>Instructions</h3>
+    <ul>
+        <li>The camera stream should start automatically</li>
+        <li>Click "Capture Image" to download a snapshot to your computer</li>
+        <li>Images are saved to your browser's default download location</li>
+    </ul>
+</div>
+
+<script>
+    const captureBtn = document.getElementById('captureBtn');
+    const notification = document.getElementById('notification');
+
+    function showNotification(message, isSuccess) {
+        notification.textContent = message;
+        notification.className = 'notification show ' + (isSuccess ? 'success' : 'error');
+
+        setTimeout(() => {
+            notification.className = 'notification';
+        }, 3000);
+    }
+
+    captureBtn.addEventListener('click', () => {
+        // Disable button temporarily
+        captureBtn.disabled = true;
+        captureBtn.textContent = 'Capturing...';
+
+        // Create a temporary link to trigger the download
+        const link = document.createElement('a');
+        link.href = '/capture';
+        link.download = ''; // Browser will use the filename from server
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Show success notification
+        showNotification('Image captured! Check your downloads folder.', true);
+
+        // Re-enable button after a short delay
+        setTimeout(() => {
+            captureBtn.disabled = false;
+            captureBtn.textContent = 'Capture Image';
+        }, 1000);
+    });
+
+    // Check if stream is loading
+    const videoStream = document.getElementById('videoStream');
+    videoStream.addEventListener('error', () => {
+        showNotification('Camera stream error. Please check if camera is connected.', false);
+    });
+</script>
+{% endblock %}
