@@ -1,0 +1,8 @@
+# Daily Raspberry Pi Schedule
+# Shuts down at 9:30 PM (21:30) and wakes up at 7:00 AM every day
+# Created for use starting November 4, 2024
+
+BEGIN	2024-11-04 21:30:00	# Start today at 9:30 PM with shutdown
+END	2035-12-31 23:59:59	# Run for ~11 years (adjust as needed)
+OFF	H9 M30			# Keep OFF for 9 hours 30 minutes (until 7:00 AM)
+ON	H14 M30			# Keep ON for 14 hours 30 minutes (until 9:30 PM)

@@ -1,0 +1,15 @@
+[Unit]
+Description=Sync system time to WittyPi RTC before shutdown
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+RequiresMountsFor=/opt/wittypi
+Documentation=file:///home/chadagate/vision-sensor/specs/001-power-monitor-install/spec.md
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'source /opt/wittypi/wittypi/utilities.sh && system_to_rtc'
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=halt.target reboot.target shutdown.target

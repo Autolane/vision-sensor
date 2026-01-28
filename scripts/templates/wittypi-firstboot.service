@@ -1,0 +1,81 @@
+[Unit]
+Description=WittyPi First Boot Configuration (one-time)
+After=multi-user.target network.target time-sync.target wittypi.service
+RequiresMountsFor=/opt/wittypi
+ConditionPathExists=/etc/systemd/system/wittypi-firstboot.service
+Documentation=file:///home/chadagate/vision-sensor/specs/001-power-monitor-install/spec.md
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 10
+ExecStart=/bin/bash -c ' \
+    set -e; \
+    echo "[WittyPi FirstBoot] Starting configuration..."; \
+    \
+    WITTYPI_DIR="/opt/wittypi"; \
+    \
+    if [ ! -f "$WITTYPI_DIR/wittypi/utilities.sh" ]; then \
+        echo "[WittyPi FirstBoot] ERROR: utilities.sh not found at $WITTYPI_DIR/wittypi/utilities.sh"; \
+        exit 1; \
+    fi; \
+    \
+    echo "[WittyPi FirstBoot] Sourcing utilities from $WITTYPI_DIR/wittypi/utilities.sh..."; \
+    . "$WITTYPI_DIR/wittypi/utilities.sh"; \
+    echo "[WittyPi FirstBoot] Utilities loaded (I2C_MC_ADDRESS=$I2C_MC_ADDRESS, I2C_CONF_DEFAULT_ON=$I2C_CONF_DEFAULT_ON)"; \
+    \
+    echo "[WittyPi FirstBoot] Waiting for NTP sync (up to 30 seconds)..."; \
+    ntp_synced=false; \
+    for i in {1..30}; do \
+        if timedatectl status 2>/dev/null | grep -q "System clock synchronized: yes"; then \
+            echo "[WittyPi FirstBoot] NTP sync complete after $i seconds"; \
+            ntp_synced=true; \
+            break; \
+        fi; \
+        sleep 1; \
+    done; \
+    \
+    if [ "$ntp_synced" = "false" ]; then \
+        echo "[WittyPi FirstBoot] WARNING: NTP sync timeout, proceeding with current system time"; \
+    fi; \
+    \
+    echo "[WittyPi FirstBoot] System time before sync: $(get_sys_time)"; \
+    echo "[WittyPi FirstBoot] RTC time before sync: $(get_rtc_time)"; \
+    \
+    echo "[WittyPi FirstBoot] Syncing system time to RTC (system_to_rtc)..."; \
+    system_to_rtc; \
+    \
+    sleep 2; \
+    \
+    echo "[WittyPi FirstBoot] System time after sync: $(get_sys_time)"; \
+    echo "[WittyPi FirstBoot] RTC time after sync: $(get_rtc_time)"; \
+    \
+    echo "[WittyPi FirstBoot] Setting auto-boot to ON..."; \
+    echo "[WittyPi FirstBoot] Command: i2c_write 0x01 $I2C_MC_ADDRESS $I2C_CONF_DEFAULT_ON 0x01"; \
+    i2c_write 0x01 "$I2C_MC_ADDRESS" "$I2C_CONF_DEFAULT_ON" 0x01; \
+    \
+    sleep 2; \
+    \
+    echo "[WittyPi FirstBoot] Verifying auto-boot setting..."; \
+    result=$(i2c_read 0x01 "$I2C_MC_ADDRESS" "$I2C_CONF_DEFAULT_ON"); \
+    echo "[WittyPi FirstBoot] Register $I2C_CONF_DEFAULT_ON value: $result"; \
+    \
+    if [ "$result" = "01" ] || [ "$result" = "0x01" ]; then \
+        echo "[WittyPi FirstBoot] ✓ Auto-boot verified as ON"; \
+        echo "[WittyPi FirstBoot] Removing first-boot service..."; \
+        systemctl disable wittypi-firstboot.service; \
+        rm -f /etc/systemd/system/wittypi-firstboot.service; \
+        systemctl daemon-reload; \
+        echo "[WittyPi FirstBoot] ✓ Configuration complete and service removed"; \
+        exit 0; \
+    else \
+        echo "[WittyPi FirstBoot] ERROR: Auto-boot verification failed (expected 01 or 0x01, got $result)"; \
+        echo "[WittyPi FirstBoot] Service will remain enabled for retry on next reboot"; \
+        echo "[WittyPi FirstBoot] To manually configure: cd /opt/wittypi/wittypi && sudo ./wittyPi.sh (select 11 -> 1 -> 1)"; \
+        exit 1; \
+    fi'
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

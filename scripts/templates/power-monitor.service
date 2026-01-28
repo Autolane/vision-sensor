@@ -1,0 +1,34 @@
+[Unit]
+Description=WittyPi Power Monitor with INA219 Battery Monitoring
+After=multi-user.target wittypi.service
+Wants=wittypi.service
+RequiresMountsFor=/opt/power-monitor /var/log/power_daily
+Documentation=file:///home/chadagate/vision-sensor/specs/001-power-monitor-install/spec.md
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/power-monitor
+ExecStart=/opt/power-monitor/witty_pi_monitor.sh
+
+# Restart policy (FR-022: automatic restart with 10-second delay)
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=power-monitor
+
+# Resource limits (Principle II: Resource Constraint Discipline)
+MemoryMax=50M
+CPUQuota=10%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ReadWritePaths=/var/log/power_daily /tmp/power_monitor
+
+[Install]
+WantedBy=multi-user.target

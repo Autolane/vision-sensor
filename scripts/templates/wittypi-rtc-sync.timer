@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily WittyPi RTC synchronization timer
+Requires=wittypi-rtc-sync-daily.service
+Documentation=file:///home/chadagate/vision-sensor/specs/001-power-monitor-install/spec.md
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

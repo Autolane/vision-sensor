@@ -195,7 +195,7 @@ prompt_configuration() {
 install_system_packages() {
     log_info "Installing system dependencies..."
 
-    local packages="python3 python3-pip python3-opencv curl modemmanager network-manager"
+    local packages="python3 python3-pip python3-opencv curl modemmanager network-manager i2c-tools python3-smbus"
 
     if run_with_progress "Installing system packages" "apt-get update -qq && apt-get install -y -qq $packages"; then
         log_info "✓ System packages installed"
@@ -476,6 +476,277 @@ configure_4g_modem() {
 }
 
 # ============================================================================
+# WittyPi Configuration
+# ============================================================================
+
+configure_wittypi() {
+    log_info "Installing and configuring WittyPi 4 Mini..."
+
+    # Non-fatal error handling pattern - log warnings and continue
+    local wittypi_dir="/opt/wittypi"
+    local wittypi_url="https://www.uugear.com/repo/WittyPi4/install.sh"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local original_dir=$(pwd)
+
+    # Enable I2C interface via raspi-config
+    log_info "Enabling I2C interface..."
+    if raspi-config nonint do_i2c 0 2>&1 | tee -a /tmp/vision_sensor_install.log; then
+        log_info "✓ I2C interface enabled"
+    else
+        log_warn "Failed to enable I2C interface - may need manual configuration"
+        return 0
+    fi
+
+    # Verify /dev/i2c-1 exists after enablement (may require reboot)
+    if [ -c /dev/i2c-1 ]; then
+        log_info "✓ I2C device /dev/i2c-1 detected"
+    else
+        log_warn "I2C device not yet available - will activate after reboot"
+        REBOOT_REQUIRED=true
+    fi
+
+    # Create installation directory
+    if [ ! -d "$wittypi_dir" ]; then
+        mkdir -p "$wittypi_dir"
+        log_info "Created WittyPi installation directory: $wittypi_dir"
+    fi
+
+    # Change to installation directory
+    cd "$wittypi_dir" || {
+        log_warn "Failed to access WittyPi installation directory"
+        return 0  # Non-fatal
+    }
+
+    # Download WittyPi 4 installation script
+    log_info "Downloading WittyPi 4 software..."
+    if ! wget -q "$wittypi_url" -O install.sh; then
+        log_warn "Failed to download WittyPi installation script"
+        cd "$original_dir"
+        return 0  # Non-fatal
+    fi
+
+    # Run installation script
+    log_info "Running WittyPi installation script (this may take a few minutes)..."
+    if sh install.sh 2>&1 | tee /tmp/wittypi_install.log; then
+        log_info "✓ WittyPi software installed to $wittypi_dir"
+    else
+        log_warn "WittyPi installation encountered errors - check /tmp/wittypi_install.log"
+    fi
+
+    # Return to original directory
+    cd "$original_dir"
+
+    # Verify installation
+    if [ ! -f "$wittypi_dir/wittypi/utilities.sh" ]; then
+        log_warn "WittyPi software not found at $wittypi_dir/wittypi"
+        log_warn "Skipping WittyPi configuration"
+        return 0  # Non-fatal
+    fi
+
+    log_info "✓ WittyPi installed at: $wittypi_dir/wittypi"
+
+    # Re-enable NTP service (WittyPi installation may have disabled it)
+    log_info "Re-enabling NTP for network time synchronization..."
+    if timedatectl set-ntp true 2>/dev/null; then
+        log_info "✓ NTP service enabled"
+    else
+        log_warn "Could not enable NTP service"
+    fi
+
+    # Install wittypi-firstboot.service
+    log_info "Installing WittyPi first-boot configuration service..."
+    if [ -f "$script_dir/templates/wittypi-firstboot.service" ]; then
+        cp "$script_dir/templates/wittypi-firstboot.service" "$SYSTEMD_DIR/"
+        chmod 644 "$SYSTEMD_DIR/wittypi-firstboot.service"
+        systemctl daemon-reload
+        if systemctl enable wittypi-firstboot.service 2>/dev/null; then
+            log_info "✓ WittyPi first-boot configuration service enabled"
+            log_info "  Service will run after reboot to configure auto-boot and RTC"
+        else
+            log_warn "Could not enable wittypi-firstboot service"
+        fi
+    else
+        log_warn "wittypi-firstboot.service template not found"
+    fi
+
+    # Install RTC sync services
+    log_info "Installing RTC synchronization services..."
+
+    # Install shutdown sync service
+    if [ -f "$script_dir/templates/wittypi-rtc-sync.service" ]; then
+        cp "$script_dir/templates/wittypi-rtc-sync.service" "$SYSTEMD_DIR/"
+        chmod 644 "$SYSTEMD_DIR/wittypi-rtc-sync.service"
+    fi
+
+    # Install daily sync timer and service
+    if [ -f "$script_dir/templates/wittypi-rtc-sync.timer" ]; then
+        cp "$script_dir/templates/wittypi-rtc-sync.timer" "$SYSTEMD_DIR/"
+        chmod 644 "$SYSTEMD_DIR/wittypi-rtc-sync.timer"
+    fi
+
+    if [ -f "$script_dir/templates/wittypi-rtc-sync-daily.service" ]; then
+        cp "$script_dir/templates/wittypi-rtc-sync-daily.service" "$SYSTEMD_DIR/"
+        chmod 644 "$SYSTEMD_DIR/wittypi-rtc-sync-daily.service"
+    fi
+
+    # Reload and enable RTC sync services
+    systemctl daemon-reload
+
+    if systemctl enable wittypi-rtc-sync.service 2>/dev/null; then
+        log_info "✓ RTC sync on shutdown enabled"
+    else
+        log_warn "Could not enable RTC sync on shutdown"
+    fi
+
+    if systemctl enable wittypi-rtc-sync.timer 2>/dev/null; then
+        log_info "✓ Daily RTC sync timer enabled"
+    else
+        log_warn "Could not enable daily RTC sync timer"
+    fi
+
+    # Install power schedule
+    log_info "Installing WittyPi power schedule..."
+
+    if [ -f "$script_dir/templates/daily_7am_to_930pm.wpi" ]; then
+        # Ensure schedules directory exists
+        mkdir -p "$wittypi_dir/wittypi/schedules"
+
+        # Copy as template
+        cp "$script_dir/templates/daily_7am_to_930pm.wpi" "$wittypi_dir/wittypi/schedules/"
+        chmod 755 "$wittypi_dir/wittypi/schedules/daily_7am_to_930pm.wpi"
+        log_info "✓ Copied schedule template to $wittypi_dir/wittypi/schedules/"
+
+        # Copy as active schedule
+        cp "$script_dir/templates/daily_7am_to_930pm.wpi" "$wittypi_dir/wittypi/schedule.wpi"
+        chmod 755 "$wittypi_dir/wittypi/schedule.wpi"
+        log_info "✓ Installed as active schedule: schedule.wpi"
+
+        # Process the schedule
+        if [ -f "$wittypi_dir/wittypi/runScript.sh" ]; then
+            log_info "Processing power schedule..."
+            cd "$wittypi_dir/wittypi" || log_warn "Could not change to WittyPi directory"
+
+            if bash runScript.sh >> schedule.log 2>&1; then
+                log_info "✓ Power schedule processed"
+                log_info "  Schedule: 7:00 AM to 9:30 PM daily (local time)"
+
+                # Verify schedule by checking log
+                if grep -q "7:00\|07:00" schedule.log 2>/dev/null && grep -q "21:30\|9:30" schedule.log 2>/dev/null; then
+                    log_info "✓ Schedule verification passed (7:00 AM and 9:30 PM times found)"
+                else
+                    log_warn "Schedule processing may need verification - check schedule.log"
+                fi
+            else
+                log_warn "Failed to process power schedule - check $wittypi_dir/wittypi/schedule.log"
+            fi
+
+            cd "$original_dir"
+        else
+            log_warn "runScript.sh not found - schedule not processed"
+        fi
+    else
+        log_warn "Power schedule file not found at $script_dir/templates/daily_7am_to_930pm.wpi"
+        log_info "  Power schedule can be configured manually later"
+    fi
+
+    # Set reboot required flag
+    REBOOT_REQUIRED=true
+    log_info "✓ WittyPi configuration complete"
+    log_info "  Reboot required to activate I2C and first-boot configuration"
+
+    return 0
+}
+
+# ============================================================================
+# Power Monitor Installation
+# ============================================================================
+
+install_power_monitor() {
+    log_info "Installing power monitoring service..."
+
+    # Non-fatal error handling pattern - log warnings and continue
+    local power_monitor_dir="/opt/power-monitor"
+    local data_dir="/var/log/power_daily"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    # Create power monitor directory
+    if [ ! -d "$power_monitor_dir" ]; then
+        mkdir -p "$power_monitor_dir"
+        log_info "✓ Created power monitor directory: $power_monitor_dir"
+    fi
+
+    # Create data directory for power logs
+    if [ ! -d "$data_dir" ]; then
+        mkdir -p "$data_dir"
+        chmod 755 "$data_dir"
+        log_info "✓ Created power data directory: $data_dir"
+    fi
+
+    # Copy monitoring script
+    if [ -f "$script_dir/templates/witty_pi_monitor.sh" ]; then
+        cp "$script_dir/templates/witty_pi_monitor.sh" "$power_monitor_dir/"
+        chmod 755 "$power_monitor_dir/witty_pi_monitor.sh"
+        chown root:root "$power_monitor_dir/witty_pi_monitor.sh"
+        log_info "✓ Installed witty_pi_monitor.sh to $power_monitor_dir/"
+    else
+        log_warn "witty_pi_monitor.sh not found - skipping power monitoring installation"
+        return 0  # Non-fatal
+    fi
+
+    # Verify python3-smbus is available (already installed in install_system_packages)
+    if ! python3 -c "import smbus" 2>/dev/null; then
+        log_warn "python3-smbus not available - battery voltage monitoring may not work"
+        log_warn "This should have been installed earlier. Manual installation: sudo apt install python3-smbus"
+    else
+        log_info "✓ python3-smbus available for INA219 battery monitoring"
+    fi
+
+    # Copy systemd service file
+    if [ -f "$script_dir/templates/power-monitor.service" ]; then
+        cp "$script_dir/templates/power-monitor.service" "$SYSTEMD_DIR/"
+        chmod 644 "$SYSTEMD_DIR/power-monitor.service"
+        chown root:root "$SYSTEMD_DIR/power-monitor.service"
+        log_info "✓ Installed power-monitor.service"
+    else
+        log_warn "power-monitor.service template not found - skipping service installation"
+        return 0  # Non-fatal
+    fi
+
+    # Reload systemd and enable service
+    systemctl daemon-reload
+
+    if systemctl enable power-monitor.service 2>/dev/null; then
+        log_info "✓ Power monitor service enabled"
+    else
+        log_warn "Failed to enable power-monitor service"
+        return 0  # Non-fatal
+    fi
+
+    # Start the service
+    if systemctl start power-monitor.service 2>/dev/null; then
+        log_info "✓ Power monitor service started"
+
+        # Wait a moment and check status
+        sleep 2
+        if systemctl is-active power-monitor.service &>/dev/null; then
+            log_info "✓ Power monitor is running"
+            log_info "  Data will be logged to $data_dir/"
+        else
+            log_warn "Power monitor service started but may not be active"
+            log_warn "This is normal if WittyPi hardware is not yet connected"
+            log_warn "Check logs with: sudo journalctl -u power-monitor -n 50"
+        fi
+    else
+        log_warn "Failed to start power-monitor service"
+        log_warn "Service requires WittyPi hardware to be connected"
+        log_warn "Service will auto-start after reboot if hardware is available"
+    fi
+
+    log_info "✓ Power monitoring configuration complete"
+    return 0
+}
+
+# ============================================================================
 # systemd Service Installation
 # ============================================================================
 
@@ -543,6 +814,31 @@ display_summary() {
     local eth_ip=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || echo "")
     local wlan_ip=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || echo "")
 
+    # WittyPi status
+    local wittypi_status="Not Installed"
+    local firstboot_status="N/A"
+    local rtc_sync_status="N/A"
+    local schedule_status="N/A"
+
+    if [ -d "/opt/wittypi/wittypi" ]; then
+        wittypi_status="Installed"
+        firstboot_status=$(systemctl is-enabled wittypi-firstboot.service 2>/dev/null || echo "Not configured")
+        rtc_sync_status=$(systemctl is-enabled wittypi-rtc-sync.timer 2>/dev/null || echo "Not configured")
+        if [ -f "/opt/wittypi/wittypi/schedule.wpi" ]; then
+            schedule_status="Installed"
+        else
+            schedule_status="Not configured"
+        fi
+    fi
+
+    # Power monitor status
+    local power_monitor_status="Not Installed"
+    local power_monitor_service="N/A"
+    if [ -f "/opt/power-monitor/witty_pi_monitor.sh" ]; then
+        power_monitor_status="Installed"
+        power_monitor_service=$(systemctl is-active power-monitor.service 2>/dev/null || echo "inactive")
+    fi
+
     echo ""
     echo "=========================================="
     echo "  Vision Sensor Installation Complete"
@@ -551,6 +847,19 @@ display_summary() {
     echo "Hostname: $hostname"
     echo "Installation Directory: $INSTALL_DIR"
     echo "Service Status: $service_status"
+    echo ""
+    echo "WittyPi 4 Mini:"
+    echo "  Installation: $wittypi_status"
+    echo "  First-Boot Config: $firstboot_status"
+    echo "  RTC Sync Timer: $rtc_sync_status"
+    echo "  Power Schedule: $schedule_status"
+    echo ""
+    echo "Power Monitor:"
+    echo "  Installation: $power_monitor_status"
+    echo "  Service Status: $power_monitor_service"
+    if [ -d "/var/log/power_daily" ]; then
+        echo "  Data Directory: /var/log/power_daily"
+    fi
     echo ""
     echo "Network Addresses:"
     [ -n "$eth_ip" ] && echo "  Ethernet (eth0): http://$eth_ip:5000"
@@ -572,7 +881,7 @@ display_summary() {
 
     if [ "$REBOOT_REQUIRED" = true ]; then
         echo "⚠️  REBOOT REQUIRED"
-        echo "  Hostname and network changes require reboot:"
+        echo "  WittyPi I2C configuration requires reboot:"
         echo "  sudo reboot"
         echo ""
     fi
@@ -614,6 +923,12 @@ main() {
 
     # Configure 4G modem
     configure_4g_modem
+
+    # Configure WittyPi power management
+    configure_wittypi
+
+    # Install power monitoring service
+    install_power_monitor
 
     # Install systemd service
     install_systemd_service
